@@ -1,6 +1,12 @@
 const crypto = require('crypto');
+const dns = require('dns');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
+
+// Prefer IPv4 so Gmail SMTP works on hosts where IPv6 is unreachable (e.g. Render)
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 // Production-ready transporter
 const createTransporter = async () => {
@@ -9,12 +15,20 @@ const createTransporter = async () => {
     console.log('📧 Using configured email service');
     // Gmail App Passwords must be 16 chars, no spaces
     const emailPass = String(process.env.EMAIL_PASS).replace(/\s/g, '');
+    // Use explicit host/port and force IPv4 to avoid ENETUNREACH on Render (IPv6 often blocked)
     return nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.EMAIL_PORT || '587', 10),
+      secure: process.env.EMAIL_SECURE === 'true',
       auth: {
         user: process.env.EMAIL_USER,
         pass: emailPass
-      }
+      },
+      connectionTimeout: 60000,
+      greetingTimeout: 60000,
+      ...(process.env.NODE_ENV === 'production' && {
+        connectionOptions: { family: 4 }
+      })
     });
   }
   
