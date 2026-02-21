@@ -3,15 +3,17 @@ const User = require('../models/User');
 const nodemailer = require('nodemailer');
 
 // Production-ready transporter
-const createTestTransporter = async () => {
+const createTransporter = async () => {
   // Check if email credentials are configured
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     console.log('📧 Using configured email service');
+    // Gmail App Passwords must be 16 chars, no spaces
+    const emailPass = String(process.env.EMAIL_PASS).replace(/\s/g, '');
     return nodemailer.createTransport({
       service: process.env.EMAIL_SERVICE || 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+        pass: emailPass
       }
     });
   }
@@ -62,9 +64,9 @@ exports.forgotPassword = async (req, res) => {
     // Create reset URL (pointing to frontend)
     const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
-    // Create fast transporter
+    // Create transporter
     console.log('📮 Creating email transporter...');
-    const transporter = await createTestTransporter();
+    const transporter = await createTransporter();
 
     // Email message
     const message = `
@@ -118,16 +120,16 @@ exports.forgotPassword = async (req, res) => {
       });
     }
     
-    if (error.message.includes('authentication')) {
+    if (error.message.includes('authentication') || error.message.includes('Invalid login') || error.code === 'EAUTH') {
       return res.status(500).json({ 
-        message: 'Email authentication failed. Check email credentials.',
+        message: 'Email authentication failed. Use a Gmail App Password (no spaces) and ensure 2FA is enabled on the account.',
         error: 'EMAIL_AUTH_FAILED'
       });
     }
     
     res.status(500).json({ 
-      message: 'Error sending password reset email', 
-      error: error.message 
+      message: error.message || 'Error sending password reset email',
+      error: error.code || 'EMAIL_SEND_FAILED'
     });
   }
 };
@@ -160,8 +162,10 @@ exports.resetPassword = async (req, res) => {
 
     await user.save();
 
-    // Send confirmation email
-    const message = `
+    // Send confirmation email (only if email is configured)
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      const transporter = await createTransporter();
+      const message = `
       <h1>Password Reset Successful</h1>
       <p>Hello ${user.name},</p>
       <p>Your password has been successfully reset.</p>
@@ -172,14 +176,15 @@ exports.resetPassword = async (req, res) => {
       <p>Thank you,<br>E-commerce Team</p>
     `;
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: user.email,
-      subject: 'Password Reset Successful - E-commerce',
-      html: message
-    };
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: user.email,
+        subject: 'Password Reset Successful - E-commerce',
+        html: message
+      };
 
-    await transporter.sendMail(mailOptions);
+      await transporter.sendMail(mailOptions);
+    }
 
     res.status(200).json({ 
       message: 'Password reset successful',
