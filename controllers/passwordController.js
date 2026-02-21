@@ -2,18 +2,41 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
 
-// Configure nodemailer
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+// Quick test transporter - uses Ethereal if no email config
+const createTestTransporter = async () => {
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    // Use real Gmail
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+  } else {
+    // Use Ethereal for testing (instant, no setup required)
+    const testAccount = await nodemailer.createTestAccount();
+    console.log('🔧 Using Ethereal test account (instant):');
+    console.log('   Preview URL will appear in console');
+    
+    return nodemailer.createTransport({
+      host: 'smtp.ethereal.email',
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass
+      }
+    });
   }
-});
+};
 
 // Forgot password
 exports.forgotPassword = async (req, res) => {
   try {
+    console.log('🔍 Starting forgot password process...');
+    const startTime = Date.now();
+    
     const { email } = req.body;
 
     // Find user by email
@@ -35,6 +58,10 @@ exports.forgotPassword = async (req, res) => {
     // Create reset URL (pointing to frontend)
     const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
+    // Create fast transporter
+    console.log('📮 Creating email transporter...');
+    const transporter = await createTestTransporter();
+
     // Email message
     const message = `
       <h1>Password Reset Request</h1>
@@ -51,22 +78,33 @@ exports.forgotPassword = async (req, res) => {
     `;
 
     // Send email
+    console.log('📤 Sending email...');
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: process.env.EMAIL_USER || 'test@ecommerce.com',
       to: user.email,
       subject: 'Password Reset Request - E-commerce',
       html: message
     };
 
-    await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent!');
+    
+    if (!process.env.EMAIL_USER) {
+      console.log('🔍 Preview URL:', nodemailer.getTestMessageUrl(info));
+    }
+
+    const endTime = Date.now();
+    console.log(`⏱️ Total time: ${endTime - startTime}ms`);
 
     res.status(200).json({ 
-      message: 'Password reset email sent successfully',
+      message: process.env.EMAIL_USER 
+        ? 'Password reset email sent successfully'
+        : 'Test email sent! Check console for preview URL',
       success: true
     });
 
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('❌ Forgot password error:', error);
     res.status(500).json({ 
       message: 'Error sending password reset email', 
       error: error.message 
