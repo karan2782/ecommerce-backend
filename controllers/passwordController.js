@@ -2,23 +2,24 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
 
-// Quick test transporter - uses Ethereal if no email config
+// Production-ready transporter
 const createTestTransporter = async () => {
+  // Check if email credentials are configured
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    // Use real Gmail
+    console.log('📧 Using configured email service');
     return nodemailer.createTransport({
-      service: 'gmail',
+      service: process.env.EMAIL_SERVICE || 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
       }
     });
-  } else {
-    // Use Ethereal for testing (instant, no setup required)
+  }
+  
+  // Fallback to Ethereal for development/testing
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔧 Using Ethereal test account (development mode)');
     const testAccount = await nodemailer.createTestAccount();
-    console.log('🔧 Using Ethereal test account (instant):');
-    console.log('   Preview URL will appear in console');
-    
     return nodemailer.createTransport({
       host: 'smtp.ethereal.email',
       port: 587,
@@ -29,6 +30,9 @@ const createTestTransporter = async () => {
       }
     });
   }
+  
+  // Production without email config - throw error
+  throw new Error('Email configuration missing in production');
 };
 
 // Forgot password
@@ -105,6 +109,22 @@ exports.forgotPassword = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Forgot password error:', error);
+    
+    // Better error messages for production
+    if (error.message.includes('Email configuration missing')) {
+      return res.status(500).json({ 
+        message: 'Email service not configured. Please contact administrator.',
+        error: 'EMAIL_CONFIG_MISSING'
+      });
+    }
+    
+    if (error.message.includes('authentication')) {
+      return res.status(500).json({ 
+        message: 'Email authentication failed. Check email credentials.',
+        error: 'EMAIL_AUTH_FAILED'
+      });
+    }
+    
     res.status(500).json({ 
       message: 'Error sending password reset email', 
       error: error.message 
