@@ -1,12 +1,11 @@
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // Create order
 exports.createOrder = async (req, res) => {
   try {
-    const { shippingAddress } = req.body;
+    const { shippingAddress, paymentMethod = 'cod' } = req.body;
 
     // Get user's cart
     const cart = await Cart.findOne({ user: req.user.id }).populate('items.product');
@@ -40,7 +39,8 @@ exports.createOrder = async (req, res) => {
       })),
       totalPrice: cart.totalPrice,
       shippingAddress,
-      paymentStatus: 'pending'
+      paymentMethod,
+      paymentStatus: paymentMethod === 'cod' ? 'pending' : 'pending'
     });
 
     await order.save();
@@ -51,6 +51,17 @@ exports.createOrder = async (req, res) => {
         item.product._id,
         { $inc: { stock: -item.quantity } }
       );
+    }
+
+    // For COD orders, clear cart immediately and mark as processing
+    if (paymentMethod === 'cod') {
+      await Cart.findOneAndUpdate(
+        { user: req.user.id },
+        { items: [], totalPrice: 0 }
+      );
+      
+      order.orderStatus = 'processing';
+      await order.save();
     }
 
     res.status(201).json({ message: 'Order created successfully', order });
@@ -92,39 +103,7 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
-// Create Stripe payment intent
-exports.createPaymentIntent = async (req, res) => {
-  try {
-    const { orderId } = req.body;
-
-    const order = await Order.findById(orderId);
-
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-
-    if (order.user.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Not authorized' });
-    }
-
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(order.totalPrice * 100), // Amount in cents
-      currency: 'usd',
-      metadata: {
-        orderId: orderId.toString()
-      }
-    });
-
-    res.status(200).json({
-      clientSecret: paymentIntent.client_secret,
-      amount: paymentIntent.amount
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Payment error', error: error.message });
-  }
-};
-
-// Update payment status
+// Update payment status (for COD orders when payment is collected)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { orderId, paymentStatus, transactionId } = req.body;
@@ -138,14 +117,6 @@ exports.updatePaymentStatus = async (req, res) => {
       },
       { new: true }
     );
-
-    if (paymentStatus === 'completed') {
-      // Clear user's cart after successful payment
-      await Cart.findOneAndUpdate(
-        { user: req.user.id },
-        { items: [], totalPrice: 0 }
-      );
-    }
 
     res.status(200).json({ message: 'Payment status updated', order });
   } catch (error) {

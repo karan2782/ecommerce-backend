@@ -37,7 +37,7 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['credit_card', 'debit_card', 'stripe'],
+    enum: ['credit_card', 'debit_card', 'stripe', 'cod'],
     default: 'stripe'
   },
   paymentStatus: {

@@ -5,7 +5,6 @@ const {
   createOrder,
   getUserOrders,
   getOrderById,
-  createPaymentIntent,
   updatePaymentStatus,
   getAllOrders
 } = require('../controllers/orderController');
@@ -14,7 +13,6 @@ const {
 router.post('/', auth, createOrder);
 router.get('/user-orders', auth, getUserOrders);
 router.get('/:id', auth, getOrderById);
-router.post('/payment-intent', auth, createPaymentIntent);
 router.put('/payment-status', auth, updatePaymentStatus);
 
 // Admin route
